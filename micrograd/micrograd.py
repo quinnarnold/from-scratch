@@ -2,8 +2,10 @@
 # Currently understand all steps, but gradually confusing myself the more I think about the backward pass gradient applications.
 # Implementing with no video will likely help.
 import math
+from tkinter.constants import X
 import numpy as np
 import matplotlib.pyplot as plt
+import random
 %matplotlib inline
 
 class Value():
@@ -129,3 +131,54 @@ b = Value(6.0)
 c = Value(-1.0)
 
 print(a+b, a*b, b-a, b**a, b**c, b.exp(), b.tanh())
+
+
+##Building a Neuron
+class Neuron:
+
+    def __init__(self, nin):
+        self.w = [Value(random.uniform(-1,1)) for _ in range(nin)]
+        self.b = Value(random.uniform(-1,1))
+
+    def __call__(self, x):
+        act = sum((wi*xi for wi, xi in zip(self.w, x)), self.b)
+        out = act.tanh()
+        return out
+
+    def parameters(self):
+        return self.w + [self.b]
+
+
+class Layer:
+
+    def __init__(self, nin, nout):
+        self.neurons = [Neuron(nin) for _ in range(nout)]
+
+    def __call__(self, x):
+        outs = [n(x) for n in self.neurons]
+        return outs[0] if len(outs) == 1 else outs
+
+    def parameters(self):
+        return [p for neuron in self.neurons for p in neuron.parameters()]
+
+
+class MLP:
+
+    def __init__(self, nin, nout):
+        sz = [nin] + nout
+        self.layers = [Layer(sz[i], sz[i+1]) for i in range(len(nout))]
+
+    def __call__(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+    def parameters(self):
+        ps = [p for layer in self.layers for p in layer.parameters()]
+        return ps
+
+x = [2.0,3.0,-1.0]
+n = MLP(3, [4,4,4,1])
+n(x)
+print(n.parameters())
+print(len(n.parameters()))
