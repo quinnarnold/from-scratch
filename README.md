@@ -1,2 +1,2 @@
 # from-scratch
-Neural Networks &amp; other ML topics from scratch
+Building Neural Networks from scratch with Python.
