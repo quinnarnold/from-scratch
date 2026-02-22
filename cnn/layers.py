@@ -110,8 +110,8 @@ class Linear(Layer):
 
     def backward(self, dout):
         x = self.cache['x']
-        self.dw = x.T @ dout
-        self.db = np.sum(dout, axis=0)
+        self.dw[:] = x.T @ dout
+        self.db[:] = np.sum(dout, axis=0)
         return dout @ self.w.T
 
     def parameters(self):
@@ -157,8 +157,8 @@ class Conv2d(Layer):
         dout_flat = dout.transpose(0, 2, 3, 1).reshape(-1, self.out_channels)
         w_flat = self.w.reshape(self.out_channels, -1)
 
-        self.dw = (dout_flat.T @ cols).reshape(self.w.shape)
-        self.db = np.sum(dout_flat, axis=0)
+        self.dw[:] = (dout_flat.T @ cols).reshape(self.w.shape)
+        self.db[:] = np.sum(dout_flat, axis=0)
 
         dcols = dout_flat @ w_flat
         dx = col2im(dcols, self.cache['x_shape'], self.kH, self.kW,
@@ -258,3 +258,102 @@ class GlobalAvgPool2d(Layer):
     def backward(self, dout):
         N, C, H, W = self.cache['shape']
         return np.broadcast_to(dout / (H * W), (N, C, H, W)).copy()
+
+
+class BatchNorm2d(Layer):
+
+    def __init__(self, num_features, momentum=0.1, eps=1e-5):
+        super().__init__()
+        self.num_features = num_features
+        self.momentum = momentum
+        self.eps = eps
+
+        self.gamma = np.ones(num_features, dtype=np.float32)
+        self.beta = np.zeros(num_features, dtype=np.float32)
+        self.dgamma = np.zeros_like(self.gamma)
+        self.dbeta = np.zeros_like(self.beta)
+
+        self.running_mean = np.zeros(num_features, dtype=np.float32)
+        self.running_var = np.ones(num_features, dtype=np.float32)
+
+    def forward(self, x):
+        if x.ndim == 4:
+            N, C, H, W = x.shape
+            x_flat = x.transpose(0, 2, 3, 1).reshape(-1, C)
+        else:
+            x_flat = x
+
+        if self.training:
+            mean = np.mean(x_flat, axis=0)
+            var = np.var(x_flat, axis=0)
+            self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
+            self.running_var = (1 - self.momentum) * self.running_var + self.momentum * var
+        else:
+            mean = self.running_mean
+            var = self.running_var
+
+        x_norm = (x_flat - mean) / np.sqrt(var + self.eps)
+        out_flat = self.gamma * x_norm + self.beta
+
+        self.cache['x_flat'] = x_flat
+        self.cache['x_norm'] = x_norm
+        self.cache['mean'] = mean
+        self.cache['var'] = var
+        self.cache['input_shape'] = x.shape
+
+        if x.ndim == 4:
+            return out_flat.reshape(N, H, W, C).transpose(0, 3, 1, 2)
+        return out_flat
+
+    def backward(self, dout):
+        x_flat = self.cache['x_flat']
+        x_norm = self.cache['x_norm']
+        mean = self.cache['mean']
+        var = self.cache['var']
+        input_shape = self.cache['input_shape']
+
+        if dout.ndim == 4:
+            N, C, H, W = dout.shape
+            dout_flat = dout.transpose(0, 2, 3, 1).reshape(-1, C)
+        else:
+            dout_flat = dout
+
+        M = dout_flat.shape[0]
+        std_inv = 1.0 / np.sqrt(var + self.eps)
+
+        self.dgamma[:] = np.sum(dout_flat * x_norm, axis=0)
+        self.dbeta[:] = np.sum(dout_flat, axis=0)
+
+        dx_norm = dout_flat * self.gamma
+        dx_flat = (1.0 / M) * std_inv * (
+            M * dx_norm
+            - np.sum(dx_norm, axis=0)
+            - x_norm * np.sum(dx_norm * x_norm, axis=0)
+        )
+
+        if input_shape is not None and len(input_shape) == 4:
+            N, C, H, W = input_shape
+            return dx_flat.reshape(N, H, W, C).transpose(0, 3, 1, 2)
+        return dx_flat
+
+    def parameters(self):
+        return [(self.gamma, self.dgamma), (self.beta, self.dbeta)]
+
+
+class Dropout(Layer):
+
+    def __init__(self, p=0.5):
+        super().__init__()
+        self.p = p
+
+    def forward(self, x):
+        if not self.training:
+            return x
+        mask = (np.random.rand(*x.shape) > self.p).astype(np.float32)
+        self.cache['mask'] = mask
+        return x * mask / (1.0 - self.p)
+
+    def backward(self, dout):
+        if not self.training:
+            return dout
+        return dout * self.cache['mask'] / (1.0 - self.p)

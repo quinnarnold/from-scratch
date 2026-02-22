@@ -38,7 +38,7 @@ def test_cross_entropy_matches_pytorch():
     np.testing.assert_allclose(dlogits, logits_t.grad.numpy(), atol=1e-5)
 
 
-from layers import ReLU, Flatten, Linear, Conv2d, MaxPool2d, AvgPool2d, GlobalAvgPool2d
+from layers import ReLU, Flatten, Linear, Conv2d, MaxPool2d, AvgPool2d, GlobalAvgPool2d, BatchNorm2d, Dropout
 
 
 def test_relu_forward_backward():
@@ -197,3 +197,66 @@ def test_global_avg_pool_forward_backward():
     out_t = torch.mean(x_t, dim=(2, 3), keepdim=True)
     out_t.backward(torch.tensor(dout))
     np.testing.assert_allclose(dx, x_t.grad.numpy(), atol=1e-6)
+
+
+def test_batchnorm2d_forward_backward():
+    np.random.seed(42)
+    x = np.random.randn(4, 8, 6, 6).astype(np.float32)
+    dout = np.random.randn(4, 8, 6, 6).astype(np.float32)
+
+    layer = BatchNorm2d(8)
+
+    pt_layer = nn.BatchNorm2d(8)
+    pt_layer.weight = nn.Parameter(torch.tensor(layer.gamma.copy(), dtype=torch.float32))
+    pt_layer.bias = nn.Parameter(torch.tensor(layer.beta.copy(), dtype=torch.float32))
+    pt_layer.running_mean = torch.tensor(layer.running_mean.copy(), dtype=torch.float32)
+    pt_layer.running_var = torch.tensor(layer.running_var.copy(), dtype=torch.float32)
+
+    out = layer.forward(x)
+    x_t = torch.tensor(x, requires_grad=True)
+    out_t = pt_layer(x_t)
+
+    np.testing.assert_allclose(out, out_t.detach().numpy(), atol=1e-5)
+
+    dx = layer.backward(dout)
+    out_t.backward(torch.tensor(dout))
+
+    np.testing.assert_allclose(dx, x_t.grad.numpy(), atol=1e-4)
+    np.testing.assert_allclose(layer.dgamma, pt_layer.weight.grad.numpy(), atol=1e-4)
+    np.testing.assert_allclose(layer.dbeta, pt_layer.bias.grad.numpy(), atol=1e-4)
+
+
+def test_batchnorm2d_running_stats():
+    np.random.seed(42)
+    layer = BatchNorm2d(4, momentum=0.1)
+
+    for _ in range(5):
+        x = np.random.randn(8, 4, 3, 3).astype(np.float32)
+        layer.forward(x)
+
+    assert not np.allclose(layer.running_mean, 0.0)
+    assert not np.allclose(layer.running_var, 1.0)
+
+    layer.train_mode(False)
+    x_test = np.random.randn(2, 4, 3, 3).astype(np.float32)
+    out = layer.forward(x_test)
+    assert out.shape == x_test.shape
+
+
+def test_dropout_forward_backward():
+    np.random.seed(42)
+    x = np.random.randn(4, 16).astype(np.float32)
+    layer = Dropout(p=0.5)
+
+    out = layer.forward(x)
+    assert out.shape == x.shape
+    zero_frac = np.mean(out == 0)
+    assert 0.3 < zero_frac < 0.7
+
+    dout = np.random.randn(4, 16).astype(np.float32)
+    dx = layer.backward(dout)
+    assert dx.shape == x.shape
+
+    layer.train_mode(False)
+    out_eval = layer.forward(x)
+    np.testing.assert_array_equal(out_eval, x)
