@@ -53,7 +53,7 @@ class TestSimpleCNN:
     def test_train_and_mode_switching(self):
         model = SimpleCNN()
         model.train()
-        model.eval()
+        model.set_eval()
         model.train()
 
 

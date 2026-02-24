@@ -1,9 +1,7 @@
-import numpy as np
 from layers import (
     Model, Layer, Conv2d, BatchNorm2d, ReLU, MaxPool2d,
     Linear, Flatten, Dropout, GlobalAvgPool2d,
 )
-from functional import cross_entropy_loss
 
 
 class Sequential(Model):

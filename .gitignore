@@ -34,3 +34,5 @@ env/
 # Misc
 .env
 *.log
+
+cnn/cifar-10-batches-py/

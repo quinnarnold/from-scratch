@@ -1,4 +1,4 @@
-import numpy as np
+import backend as B
 
 
 class SGD:
@@ -9,11 +9,11 @@ class SGD:
         self.lr = lr
         self.momentum = momentum
         self.weight_decay = weight_decay
-        self.velocities = [np.zeros_like(p) for p, _ in params]
+        self.velocities = [B.zeros_like(p) for p, _ in params]
 
     def step(self):
         for i, (param, grad) in enumerate(self.params):
-            g = grad.copy()
+            g = B.copy(grad)
             if self.weight_decay != 0:
                 g += self.weight_decay * param
             self.velocities[i] = self.momentum * self.velocities[i] + g
@@ -35,21 +35,21 @@ class Adam:
         self.beta2 = beta2
         self.eps = eps
         self.weight_decay = weight_decay
-        self.m = [np.zeros_like(p) for p, _ in params]
-        self.v = [np.zeros_like(p) for p, _ in params]
+        self.m = [B.zeros_like(p) for p, _ in params]
+        self.v = [B.zeros_like(p) for p, _ in params]
         self.t = 0
 
     def step(self):
         self.t += 1
         for i, (param, grad) in enumerate(self.params):
-            g = grad.copy()
+            g = B.copy(grad)
             if self.weight_decay != 0:
                 g += self.weight_decay * param
             self.m[i] = self.beta1 * self.m[i] + (1 - self.beta1) * g
             self.v[i] = self.beta2 * self.v[i] + (1 - self.beta2) * g ** 2
             m_hat = self.m[i] / (1 - self.beta1 ** self.t)
             v_hat = self.v[i] / (1 - self.beta2 ** self.t)
-            param[:] -= self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
+            param[:] -= self.lr * m_hat / (B.sqrt(v_hat) + self.eps)
 
     def zero_grad(self):
         for _, grad in self.params:

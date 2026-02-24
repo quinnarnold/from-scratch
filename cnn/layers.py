@@ -1,4 +1,4 @@
-import numpy as np
+import backend as B
 from functional import im2col, col2im, kaiming_init
 
 
@@ -23,7 +23,7 @@ class Layer:
 
 
 class Model:
-    """Base class for models. Subclass and override forward() for custom architectures."""
+    """Base class for models."""
 
     def __init__(self):
         self._layers = []
@@ -69,7 +69,7 @@ class Model:
         for layer in self._layers:
             layer.train_mode(True)
 
-    def eval(self):
+    def set_eval(self):
         self._register_layers()
         for layer in self._layers:
             layer.train_mode(False)
@@ -100,9 +100,9 @@ class Linear(Layer):
     def __init__(self, in_features, out_features):
         super().__init__()
         self.w = kaiming_init((in_features, out_features), in_features)
-        self.b = np.zeros(out_features, dtype=np.float32)
-        self.dw = np.zeros_like(self.w)
-        self.db = np.zeros_like(self.b)
+        self.b = B.zeros(out_features)
+        self.dw = B.zeros_like(self.w)
+        self.db = B.zeros_like(self.b)
 
     def forward(self, x):
         self.cache['x'] = x
@@ -111,7 +111,7 @@ class Linear(Layer):
     def backward(self, dout):
         x = self.cache['x']
         self.dw[:] = x.T @ dout
-        self.db[:] = np.sum(dout, axis=0)
+        self.db[:] = B.sum(dout, axis=0)
         return dout @ self.w.T
 
     def parameters(self):
@@ -132,9 +132,9 @@ class Conv2d(Layer):
 
         fan_in = in_channels * self.kH * self.kW
         self.w = kaiming_init((out_channels, in_channels, self.kH, self.kW), fan_in)
-        self.b = np.zeros(out_channels, dtype=np.float32)
-        self.dw = np.zeros_like(self.w)
-        self.db = np.zeros_like(self.b)
+        self.b = B.zeros(out_channels)
+        self.dw = B.zeros_like(self.w)
+        self.db = B.zeros_like(self.b)
 
     def forward(self, x):
         N, C, H, W = x.shape
@@ -146,7 +146,7 @@ class Conv2d(Layer):
 
         w_flat = self.w.reshape(self.out_channels, -1)
         out = cols @ w_flat.T + self.b
-        out = out.reshape(N, out_h, out_w, self.out_channels).transpose(0, 3, 1, 2)
+        out = B.transpose(out.reshape(N, out_h, out_w, self.out_channels), (0, 3, 1, 2))
         return out
 
     def backward(self, dout):
@@ -154,11 +154,11 @@ class Conv2d(Layer):
         out_h, out_w = self.cache['out_h'], self.cache['out_w']
         cols = self.cache['cols']
 
-        dout_flat = dout.transpose(0, 2, 3, 1).reshape(-1, self.out_channels)
+        dout_flat = B.transpose(dout, (0, 2, 3, 1)).reshape(-1, self.out_channels)
         w_flat = self.w.reshape(self.out_channels, -1)
 
         self.dw[:] = (dout_flat.T @ cols).reshape(self.w.shape)
-        self.db[:] = np.sum(dout_flat, axis=0)
+        self.db[:] = B.sum(dout_flat, axis=0)
 
         dcols = dout_flat @ w_flat
         dx = col2im(dcols, self.cache['x_shape'], self.kH, self.kW,
@@ -181,14 +181,14 @@ class MaxPool2d(Layer):
         out_h = (H - self.k) // self.stride + 1
         out_w = (W - self.k) // self.stride + 1
 
-        x_reshaped = np.zeros((N, C, out_h, out_w, self.k, self.k))
+        x_reshaped = B.zeros((N, C, out_h, out_w, self.k, self.k))
         for i in range(self.k):
             for j in range(self.k):
                 x_reshaped[:, :, :, :, i, j] = x[:, :,
                     i:i + self.stride * out_h:self.stride,
                     j:j + self.stride * out_w:self.stride]
 
-        out = x_reshaped.max(axis=(4, 5))
+        out = B.amax(x_reshaped, axis=(4, 5))
         self.cache['x'] = x
         self.cache['x_reshaped'] = x_reshaped
         self.cache['out'] = out
@@ -202,7 +202,7 @@ class MaxPool2d(Layer):
         out_h, out_w = out.shape[2], out.shape[3]
 
         mask = (x_reshaped == out[:, :, :, :, None, None])
-        dx = np.zeros_like(x)
+        dx = B.zeros_like(x)
         dout_expanded = dout[:, :, :, :, None, None] * mask
 
         for i in range(self.k):
@@ -228,7 +228,7 @@ class AvgPool2d(Layer):
         self.cache['out_h'] = out_h
         self.cache['out_w'] = out_w
 
-        out = np.zeros((N, C, out_h, out_w))
+        out = B.zeros((N, C, out_h, out_w))
         for i in range(self.k):
             for j in range(self.k):
                 out += x[:, :,
@@ -239,7 +239,7 @@ class AvgPool2d(Layer):
     def backward(self, dout):
         x_shape = self.cache['x_shape']
         out_h, out_w = self.cache['out_h'], self.cache['out_w']
-        dx = np.zeros(x_shape)
+        dx = B.zeros(x_shape)
         scaled = dout / (self.k * self.k)
         for i in range(self.k):
             for j in range(self.k):
@@ -253,11 +253,11 @@ class GlobalAvgPool2d(Layer):
 
     def forward(self, x):
         self.cache['shape'] = x.shape
-        return np.mean(x, axis=(2, 3), keepdims=True)
+        return B.mean(x, axis=(2, 3), keepdims=True)
 
     def backward(self, dout):
         N, C, H, W = self.cache['shape']
-        return np.broadcast_to(dout / (H * W), (N, C, H, W)).copy()
+        return B.broadcast_to(dout / (H * W), (N, C, H, W))
 
 
 class BatchNorm2d(Layer):
@@ -268,31 +268,31 @@ class BatchNorm2d(Layer):
         self.momentum = momentum
         self.eps = eps
 
-        self.gamma = np.ones(num_features, dtype=np.float32)
-        self.beta = np.zeros(num_features, dtype=np.float32)
-        self.dgamma = np.zeros_like(self.gamma)
-        self.dbeta = np.zeros_like(self.beta)
+        self.gamma = B.ones(num_features)
+        self.beta = B.zeros(num_features)
+        self.dgamma = B.zeros_like(self.gamma)
+        self.dbeta = B.zeros_like(self.beta)
 
-        self.running_mean = np.zeros(num_features, dtype=np.float32)
-        self.running_var = np.ones(num_features, dtype=np.float32)
+        self.running_mean = B.zeros(num_features)
+        self.running_var = B.ones(num_features)
 
     def forward(self, x):
         if x.ndim == 4:
             N, C, H, W = x.shape
-            x_flat = x.transpose(0, 2, 3, 1).reshape(-1, C)
+            x_flat = B.transpose(x, (0, 2, 3, 1)).reshape(-1, C)
         else:
             x_flat = x
 
         if self.training:
-            mean = np.mean(x_flat, axis=0)
-            var = np.var(x_flat, axis=0)
+            mean = B.mean(x_flat, axis=0)
+            var = B.var(x_flat, axis=0)
             self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
             self.running_var = (1 - self.momentum) * self.running_var + self.momentum * var
         else:
             mean = self.running_mean
             var = self.running_var
 
-        x_norm = (x_flat - mean) / np.sqrt(var + self.eps)
+        x_norm = (x_flat - mean) / B.sqrt(var + self.eps)
         out_flat = self.gamma * x_norm + self.beta
 
         self.cache['x_flat'] = x_flat
@@ -302,7 +302,7 @@ class BatchNorm2d(Layer):
         self.cache['input_shape'] = x.shape
 
         if x.ndim == 4:
-            return out_flat.reshape(N, H, W, C).transpose(0, 3, 1, 2)
+            return B.transpose(out_flat.reshape(N, H, W, C), (0, 3, 1, 2))
         return out_flat
 
     def backward(self, dout):
@@ -314,26 +314,26 @@ class BatchNorm2d(Layer):
 
         if dout.ndim == 4:
             N, C, H, W = dout.shape
-            dout_flat = dout.transpose(0, 2, 3, 1).reshape(-1, C)
+            dout_flat = B.transpose(dout, (0, 2, 3, 1)).reshape(-1, C)
         else:
             dout_flat = dout
 
         M = dout_flat.shape[0]
-        std_inv = 1.0 / np.sqrt(var + self.eps)
+        std_inv = 1.0 / B.sqrt(var + self.eps)
 
-        self.dgamma[:] = np.sum(dout_flat * x_norm, axis=0)
-        self.dbeta[:] = np.sum(dout_flat, axis=0)
+        self.dgamma[:] = B.sum(dout_flat * x_norm, axis=0)
+        self.dbeta[:] = B.sum(dout_flat, axis=0)
 
         dx_norm = dout_flat * self.gamma
         dx_flat = (1.0 / M) * std_inv * (
             M * dx_norm
-            - np.sum(dx_norm, axis=0)
-            - x_norm * np.sum(dx_norm * x_norm, axis=0)
+            - B.sum(dx_norm, axis=0)
+            - x_norm * B.sum(dx_norm * x_norm, axis=0)
         )
 
         if input_shape is not None and len(input_shape) == 4:
             N, C, H, W = input_shape
-            return dx_flat.reshape(N, H, W, C).transpose(0, 3, 1, 2)
+            return B.transpose(dx_flat.reshape(N, H, W, C), (0, 3, 1, 2))
         return dx_flat
 
     def parameters(self):
@@ -349,7 +349,7 @@ class Dropout(Layer):
     def forward(self, x):
         if not self.training:
             return x
-        mask = (np.random.rand(*x.shape) > self.p).astype(np.float32)
+        mask = B.to_float(B.rand(*x.shape) > self.p)
         self.cache['mask'] = mask
         return x * mask / (1.0 - self.p)
 

@@ -1,4 +1,5 @@
-import numpy as np
+import math
+import backend as B
 
 
 def im2col(x, kH, kW, stride=1, padding=0):
@@ -16,19 +17,19 @@ def im2col(x, kH, kW, stride=1, padding=0):
     """
     N, C, H, W = x.shape
     if padding > 0:
-        x = np.pad(x, ((0, 0), (0, 0), (padding, padding), (padding, padding)))
+        x = B.pad(x, ((0, 0), (0, 0), (padding, padding), (padding, padding)))
     H_pad, W_pad = x.shape[2], x.shape[3]
     out_h = (H_pad - kH) // stride + 1
     out_w = (W_pad - kW) // stride + 1
 
-    cols = np.zeros((N, C, kH, kW, out_h, out_w))
+    cols = B.zeros((N, C, kH, kW, out_h, out_w))
     for i in range(kH):
         i_max = i + stride * out_h
         for j in range(kW):
             j_max = j + stride * out_w
             cols[:, :, i, j, :, :] = x[:, :, i:i_max:stride, j:j_max:stride]
 
-    cols = cols.transpose(0, 4, 5, 1, 2, 3).reshape(N * out_h * out_w, -1)
+    cols = B.transpose(cols, (0, 4, 5, 1, 2, 3)).reshape(N * out_h * out_w, -1)
     return cols, out_h, out_w
 
 
@@ -51,8 +52,10 @@ def col2im(dcols, x_shape, kH, kW, stride=1, padding=0):
     out_h = (H_pad - kH) // stride + 1
     out_w = (W_pad - kW) // stride + 1
 
-    dcols_reshaped = dcols.reshape(N, out_h, out_w, C, kH, kW).transpose(0, 3, 4, 5, 1, 2)
-    dx_padded = np.zeros((N, C, H_pad, W_pad))
+    dcols_reshaped = B.transpose(
+        dcols.reshape(N, out_h, out_w, C, kH, kW), (0, 3, 4, 5, 1, 2)
+    )
+    dx_padded = B.zeros((N, C, H_pad, W_pad))
 
     for i in range(kH):
         i_max = i + stride * out_h
@@ -67,9 +70,9 @@ def col2im(dcols, x_shape, kH, kW, stride=1, padding=0):
 
 def softmax(x):
     """Numerically stable softmax over last axis."""
-    shifted = x - np.max(x, axis=-1, keepdims=True)
-    exp_x = np.exp(shifted)
-    return exp_x / np.sum(exp_x, axis=-1, keepdims=True)
+    shifted = x - B.amax(x, axis=-1, keepdims=True)
+    exp_x = B.exp(shifted)
+    return exp_x / B.sum(exp_x, axis=-1, keepdims=True)
 
 
 def cross_entropy_loss(logits, targets):
@@ -85,22 +88,23 @@ def cross_entropy_loss(logits, targets):
     """
     N = logits.shape[0]
     probs = softmax(logits)
-    log_probs = -np.log(probs[np.arange(N), targets] + 1e-12)
-    loss = np.mean(log_probs)
+    idx = B.arange(N)
+    log_probs = -B.log(probs[idx, targets] + 1e-12)
+    loss = B.mean(log_probs)
 
-    dlogits = probs.copy()
-    dlogits[np.arange(N), targets] -= 1.0
+    dlogits = B.copy(probs)
+    dlogits[idx, targets] -= 1.0
     dlogits /= N
     return loss, dlogits
 
 
 def kaiming_init(shape, fan_in):
     """Kaiming He initialization for ReLU networks."""
-    std = np.sqrt(2.0 / fan_in)
-    return np.random.randn(*shape).astype(np.float32) * std
+    std = math.sqrt(2.0 / fan_in)
+    return B.randn(*shape) * std
 
 
 def xavier_init(shape, fan_in, fan_out):
     """Xavier/Glorot initialization."""
-    std = np.sqrt(2.0 / (fan_in + fan_out))
-    return np.random.randn(*shape).astype(np.float32) * std
+    std = math.sqrt(2.0 / (fan_in + fan_out))
+    return B.randn(*shape) * std
